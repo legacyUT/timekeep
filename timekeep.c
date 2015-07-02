@@ -31,7 +31,7 @@
 
 #include <stdlib.h>
 #include <fcntl.h>
-#include <stdio.h>
+#include <unistd.h>
 
 #include <sys/time.h>
 
@@ -42,7 +42,7 @@
 #include <errno.h>
 
 #define RTC_SYS_FILE "/sys/class/rtc/rtc0/since_epoch"
-#define TIME_ADJUST_PROP "persist.sys.timeadjust"
+#define TIME_ADJUST_PATH "/data/time/timekeep"
 
 int read_epoch(unsigned long* epoch) {
 	int res = 0;
@@ -77,6 +77,7 @@ int store_time() {
 	int res = -1;
 	struct tm tm;
 	time_t t;
+	int timeadj_fd, prop_len;
 
 	// Get time and adjust for local time
 	time(&t);
@@ -89,10 +90,17 @@ int store_time() {
 			ALOGI("Failed to read epoch while storing");
 		} else {
 			seconds -= epoch_since;
-			snprintf(prop, PROPERTY_VALUE_MAX, "%lu", seconds);
-			property_set(TIME_ADJUST_PROP, prop);
-			ALOGI("Time adjustment stored to property");
-			res = 0;
+			prop_len = snprintf(prop, PROPERTY_VALUE_MAX, "%lu\n", seconds);
+			timeadj_fd = open(TIME_ADJUST_PATH, O_RDWR|O_CREAT, 0644);
+			if (timeadj_fd >= 0) {
+				write(timeadj_fd, prop, prop_len);
+				close(timeadj_fd);
+				ALOGI("Time adjustment stored to file");
+				res = 0;
+			}
+			else {
+				ALOGE("Cannot create file. errno = %d", errno);
+			}
 		}
 	}
 
@@ -106,23 +114,28 @@ int restore_time() {
 	unsigned long epoch_since = 0;
 	int res = -1;
 	char prop[PROPERTY_VALUE_MAX];
-	FILE *getprop_proc;
+	int timeadj_fd, read_len;
 
 	memset(prop, 0x0, PROPERTY_VALUE_MAX);
-	getprop_proc = popen("getprop " TIME_ADJUST_PROP " 0", "r");
-	if (!getprop_proc) {
-		ALOGE("Can't execute getprop.");
+
+	timeadj_fd = open(TIME_ADJUST_PATH, O_RDONLY);
+	if (timeadj_fd < 0) {
+		ALOGE("Cannot open file. errno = %d", errno);
 		return res;
 	}
-	fgets(prop, PROPERTY_VALUE_MAX, getprop_proc);
-	pclose(getprop_proc);
+
+	read_len = read(timeadj_fd, prop, PROPERTY_VALUE_MAX);
+	if (read_len <= 0) {
+		ALOGE("Cannot read file. errno = %d", errno);
+		return res;
+	}
 
 	if (strcmp(prop, "0") != 0) {
 		char *endp = NULL;
 		errno = 0;
 		time_adjust = strtoul(prop, &endp, 10);
 		if (*endp != '\0' && *endp != '\n') {
-			ALOGI("Property in " TIME_ADJUST_PROP
+			ALOGI("Property in " TIME_ADJUST_PATH
 			      " is not valid: %s (%d)", prop, errno);
 			return res;
 		}
