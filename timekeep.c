@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2015 Sony Mobile Communications Inc.
  *
  * All rights reserved.
@@ -31,6 +31,7 @@
 
 #include <stdlib.h>
 #include <fcntl.h>
+#include <stdio.h>
 
 #include <sys/time.h>
 
@@ -105,13 +106,22 @@ int restore_time() {
 	unsigned long epoch_since = 0;
 	int res = -1;
 	char prop[PROPERTY_VALUE_MAX];
+	FILE *getprop_proc;
+
 	memset(prop, 0x0, PROPERTY_VALUE_MAX);
-	property_get(TIME_ADJUST_PROP, prop, "0");
+	getprop_proc = popen("getprop " TIME_ADJUST_PROP " 0", "r");
+	if (!getprop_proc) {
+		ALOGE("Can't execute getprop.");
+		return res;
+	}
+	fgets(prop, PROPERTY_VALUE_MAX, getprop_proc);
+	pclose(getprop_proc);
 
 	if (strcmp(prop, "0") != 0) {
 		char *endp = NULL;
+		errno = 0;
 		time_adjust = strtoul(prop, &endp, 10);
-		if (*endp != '\0') {
+		if (*endp != '\0' && *endp != '\n') {
 			ALOGI("Property in " TIME_ADJUST_PROP
 			      " is not valid: %s (%d)", prop, errno);
 			return res;
